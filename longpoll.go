@@ -12,7 +12,7 @@ import (
 	"github.com/satori/go.uuid"
 )
 
-var logger = logging.MustGetLogger("longpoll")
+var logger *logging.Logger
 
 func millisecondStringToTime(ms string) (time.Time, error) {
 	epoch, err := strconv.ParseInt(ms, 10, 64)
@@ -67,7 +67,9 @@ type manager struct {
 	maxTimeout int
 }
 
-func NewManager() *manager {
+func NewManager(logModule string) *manager {
+	logger = logging.MustGetLogger(logModule)
+
 	m := &manager{
 		clients:        make([]client, 0),
 		connections:    make(chan client),
@@ -76,6 +78,8 @@ func NewManager() *manager {
 		history:        make([]event, 0),
 		maxTimeout:     120,
 	}
+
+	logger.Notice("Starting HTTP longpoll publisher")
 
 	go m.run()
 	return m
@@ -110,6 +114,7 @@ func (this manager) run() {
 
 func (this *manager) add(cli client) {
 	this.Lock()
+	defer this.Unlock()
 
 	this.clients = append(this.clients, cli)
 
@@ -144,12 +149,11 @@ func (this *manager) add(cli client) {
 	if events != nil {
 		cli.messages <- message{Timestamp: tstamp, Events: events}
 	}
-
-	this.Unlock()
 }
 
 func (this *manager) remove(cli client) {
 	this.Lock()
+	defer this.Unlock()
 
 	idx := -1
 
@@ -163,25 +167,21 @@ func (this *manager) remove(cli client) {
 	if idx >= 0 {
 		this.clients = append(this.clients[:idx], this.clients[idx+1:]...)
 	}
-
-	this.Unlock()
-}
-
-func (this *manager) historize(e event) {
-	this.Lock()
-	this.history = append(this.history, e)
-	this.Unlock()
 }
 
 func (this manager) Publish(category string, data interface{}) error {
+	this.Lock()
+	defer this.Unlock()
+
 	e := event{
 		Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 		Category:  category,
 		Data:      data,
 	}
 
-	this.historize(e)
-	logger.Debugf("PUBLISHING %#v\n", e)
+	logger.Debugf("Publishing event %#v\n", e)
+
+	this.history = append(this.history, e)
 	this.events <- e
 
 	return nil
@@ -207,22 +207,24 @@ func (this manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	t, err := strconv.Atoi(r.URL.Query().Get("timeout"))
 	if err != nil || t > this.maxTimeout || t < 1 {
-		logger.Errorf("Invalid timeout parameter %q\n", r.URL.Query().Get("timeout"))
+		logger.Errorf("Invalid timeout parameter for request %s\n", r.URL)
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(`{"error": "Invalid timeout parameter"}`))
 		return
 	}
 
+	logger.Debugf("Timeout is set to %d seconds for request %s\n", t, r.URL)
+
 	c := r.URL.Query().Get("category")
 	if len(c) == 0 || len(c) > 1024 {
-		logger.Error("Invalid category parameter -- must be 1-1024 characters long.")
+		logger.Errorf("Invalid category parameter for request %s\n", r.URL)
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(`{"error": "Invalid category parameter."}`))
 		return
 	}
 
-	// Default to looking for all events
-	last := time.Now().UnixNano() / int64(time.Millisecond)
+	// Default to looking for all events (ie. `last` defaults to 0)
+	var last int64
 
 	// since is string of milliseconds since epoch
 	s := r.URL.Query().Get("since")
@@ -232,12 +234,14 @@ func (this manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		last, err = strconv.ParseInt(s, 10, 64)
 		if err != nil {
-			logger.Errorf("Error parsing since parameter %s\n", s)
+			logger.Errorf("Error parsing since parameter %s for request %s\n", s, r.URL)
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(`{"error": "Invalid since parameter."}`))
 			return
 		}
 	}
+
+	logger.Debugf("The `since` epoch timestamp is set to %d for request %s\n", last, r.URL)
 
 	cli := client{id: uuid.NewV4(), matcher: c, since: last, messages: make(chan message, 1)}
 	this.connections <- cli
@@ -246,20 +250,23 @@ func (this manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case msg := <-cli.messages:
-		logger.Debugf("WRITING %#v\n", msg)
+		logger.Debugf("Writing %#v for request %s\n", msg, r.URL)
 
 		m, err := json.Marshal(msg)
 		if err != nil {
+			logger.Error("Error marshaling JSON: %s\n", err.Error())
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(`{"error": "JSON marshal failure"}`))
 		}
 
 		w.Write(m)
 	case <-time.After(time.Duration(t) * time.Second):
+		logger.Debugf("Timeout reached for request %s\n", r.URL)
 		w.WriteHeader(http.StatusGatewayTimeout)
 		w.Write(timeout{}.ToJSON())
 	case <-closed:
-		this.disconnections <- cli
-		logger.Debugf("Closing HTTP request at %s\n", r.URL)
+		logger.Debugf("Client closed connection for request %s\n", r.URL)
 	}
+
+	this.disconnections <- cli
 }
