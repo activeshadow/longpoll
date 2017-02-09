@@ -85,7 +85,7 @@ func NewManager(logModule string) *manager {
 	return m
 }
 
-func (this manager) run() {
+func (this *manager) run() {
 	for {
 		select {
 		case cli := <-this.connections:
@@ -116,8 +116,6 @@ func (this *manager) add(cli client) {
 	this.Lock()
 	defer this.Unlock()
 
-	this.clients = append(this.clients, cli)
-
 	var (
 		events []event
 		tstamp = int64(-1)
@@ -128,12 +126,13 @@ func (this *manager) add(cli client) {
 		historical events that match its given category and since parameters.
 	*/
 	for _, e := range this.history {
-		if e.Timestamp <= cli.since { // would this ever happen?
+		if e.Timestamp <= cli.since {
 			continue
 		}
 
 		match, err := zglob.Match(cli.matcher, e.Category)
 		if err != nil {
+			logger.Errorf("Glob match error: %s\n", err.Error())
 			continue
 		}
 
@@ -146,7 +145,11 @@ func (this *manager) add(cli client) {
 		}
 	}
 
-	if events != nil {
+	// If we have no events to publish to the client right now, add it to
+	// the list of clients to consider for the next published event.
+	if events == nil {
+		this.clients = append(this.clients, cli)
+	} else {
 		cli.messages <- message{Timestamp: tstamp, Events: events}
 	}
 }
@@ -169,7 +172,7 @@ func (this *manager) remove(cli client) {
 	}
 }
 
-func (this manager) Publish(category string, data interface{}) error {
+func (this *manager) Publish(category string, data interface{}) error {
 	this.Lock()
 	defer this.Unlock()
 
