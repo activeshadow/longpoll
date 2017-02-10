@@ -63,7 +63,7 @@ type manager struct {
 	disconnections chan client
 	events         chan event
 
-	history    []event
+	history    map[string][]event
 	maxTimeout int
 }
 
@@ -75,7 +75,7 @@ func NewManager(logModule string) *manager {
 		connections:    make(chan client),
 		disconnections: make(chan client),
 		events:         make(chan event),
-		history:        make([]event, 0),
+		history:        make(map[string][]event),
 		maxTimeout:     120,
 	}
 
@@ -125,22 +125,23 @@ func (this *manager) add(cli client) {
 		On initial connection, provide the new client with all the known
 		historical events that match its given category and since parameters.
 	*/
-	for _, e := range this.history {
-		if e.Timestamp <= cli.since {
-			continue
-		}
-
-		match, err := zglob.Match(cli.matcher, e.Category)
+	for k, v := range this.history {
+		match, err := zglob.Match(cli.matcher, k)
 		if err != nil {
-			logger.Errorf("Glob match error: %s\n", err.Error())
 			continue
 		}
 
 		if match {
-			events = append(events, e)
+			for _, e := range v {
+				if e.Timestamp <= cli.since {
+					continue
+				}
 
-			if e.Timestamp > tstamp {
-				tstamp = e.Timestamp
+				events = append(events, e)
+
+				if e.Timestamp > tstamp {
+					tstamp = e.Timestamp
+				}
 			}
 		}
 	}
@@ -172,7 +173,7 @@ func (this *manager) remove(cli client) {
 	}
 }
 
-func (this *manager) Publish(category string, data interface{}) error {
+func (this *manager) Publish(category string, data interface{}, lvc bool) error {
 	this.Lock()
 	defer this.Unlock()
 
@@ -182,11 +183,15 @@ func (this *manager) Publish(category string, data interface{}) error {
 		Data:      data,
 	}
 
+	if lvc {
+		this.history[category] = []event{e}
+	} else {
+		this.history[category] = append(this.history[category], e)
+	}
+
 	logger.Debugf("Publishing event %#v\n", e)
 
-	this.history = append(this.history, e)
 	this.events <- e
-
 	return nil
 }
 
