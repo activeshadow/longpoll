@@ -133,7 +133,7 @@ func (this *manager) remove(cli client) {
 	}
 }
 
-func (this manager) nowToMillisecondEpoch() int64 {
+func (this *manager) nowToMillisecondEpoch() int64 {
 	this.Lock()
 	defer this.Unlock()
 
@@ -160,7 +160,7 @@ Status Codes Returned:
 	* 504 - timestamp as JSON
 */
 
-func (this manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (this *manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger.Debugf("Handling HTTP request at %s\n", r.URL)
 
 	// We'll return JSON no matter what
