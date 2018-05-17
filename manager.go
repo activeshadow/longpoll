@@ -28,7 +28,7 @@ type client struct {
 	messages chan message
 }
 
-type manager struct {
+type Manager struct {
 	sync.Mutex
 
 	clients []client
@@ -42,7 +42,7 @@ type manager struct {
 	maxTimeout int
 }
 
-func NewManager(lvc bool) *manager {
+func NewManager(lvc bool) *Manager {
 	m := &manager{
 		clients:        make([]client, 0),
 		connections:    make(chan client),

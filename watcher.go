@@ -21,7 +21,7 @@ type Message struct {
 	Events    []Event `json:"events"`
 }
 
-type watcher struct {
+type Watcher struct {
 	sync.RWMutex
 
 	server    string
@@ -29,7 +29,7 @@ type watcher struct {
 	since     int64
 }
 
-func NewWatcher(s string, t *http.Transport) *watcher {
+func NewWatcher(s string, t *http.Transport) *Watcher {
 	return &watcher{server: s, transport: t}
 }
 
