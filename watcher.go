@@ -29,11 +29,11 @@ type Watcher struct {
 	since     int64
 }
 
-func NewWatcher(s string, t *http.Transport) *Watcher {
-	return &watcher{server: s, transport: t}
+func NewWatcher(s string, t *http.Transport, w int64) *Watcher {
+	return &Watcher{server: s, transport: t, since: w}
 }
 
-func (this *watcher) get(ctx context.Context, path string) (int, []byte, error) {
+func (this *Watcher) get(ctx context.Context, path string) (int, []byte, error) {
 	cli := &http.Client{Transport: this.transport}
 	uri := this.server + path
 
@@ -65,7 +65,7 @@ func (this *watcher) get(ctx context.Context, path string) (int, []byte, error) 
 	return 0, []byte{}, errors.New("unable to make GET request")
 }
 
-func (this *watcher) Watch(ctx context.Context, path string, events chan Event) error {
+func (this *Watcher) Watch(ctx context.Context, path string, events chan Event) error {
 	for {
 		path := fmt.Sprintf("%s?timeout=%d&since=%d", path, 120, this.since)
 		code, body, err := this.get(ctx, path)

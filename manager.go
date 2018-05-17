@@ -43,7 +43,7 @@ type Manager struct {
 }
 
 func NewManager(lvc bool) *Manager {
-	m := &manager{
+	m := &Manager{
 		clients:        make([]client, 0),
 		connections:    make(chan client),
 		disconnections: make(chan client),
@@ -59,7 +59,7 @@ func NewManager(lvc bool) *Manager {
 	return m
 }
 
-func (this *manager) run() {
+func (this *Manager) run() {
 	for {
 		select {
 		case cli := <-this.connections:
@@ -85,7 +85,7 @@ func (this *manager) run() {
 	}
 }
 
-func (this *manager) add(cli client) {
+func (this *Manager) add(cli client) {
 	var (
 		events []event
 		tstamp = int64(-1)
@@ -114,7 +114,7 @@ func (this *manager) add(cli client) {
 	}
 }
 
-func (this *manager) remove(cli client) {
+func (this *Manager) remove(cli client) {
 	idx := -1
 
 	for i, c := range this.clients {
@@ -129,14 +129,14 @@ func (this *manager) remove(cli client) {
 	}
 }
 
-func (this *manager) nowToMillisecondEpoch() int64 {
+func (this *Manager) nowToMillisecondEpoch() int64 {
 	this.Lock()
 	defer this.Unlock()
 
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
-func (this *manager) Publish(data interface{}) error {
+func (this *Manager) Publish(data interface{}) error {
 	e := event{
 		Data:      data,
 		timestamp: this.nowToMillisecondEpoch(),
@@ -156,7 +156,7 @@ Status Codes Returned:
 	* 504 - timestamp as JSON
 */
 
-func (this *manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (this *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Handling HTTP request at %s\n", r.URL)
 
 	// We'll return JSON no matter what

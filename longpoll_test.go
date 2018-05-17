@@ -49,7 +49,7 @@ func TestWatcher(t *testing.T) {
 
 	pub := httptest.NewServer(mux)
 
-	watcher := NewWatcher(pub.URL, http.DefaultTransport.(*http.Transport))
+	watcher := NewWatcher(pub.URL, http.DefaultTransport.(*http.Transport), 0)
 	events := make(chan Event)
 	done := make(chan struct{})
 
