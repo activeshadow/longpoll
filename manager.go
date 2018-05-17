@@ -3,16 +3,14 @@ package longpoll
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/op/go-logging"
 	"github.com/satori/go.uuid"
 )
-
-var logger *logging.Logger
 
 type event struct {
 	Data      interface{} `json:"data"`
@@ -44,9 +42,7 @@ type manager struct {
 	maxTimeout int
 }
 
-func NewManager(logModule string, lvc bool) *manager {
-	logger = logging.MustGetLogger(logModule)
-
+func NewManager(lvc bool) *manager {
 	m := &manager{
 		clients:        make([]client, 0),
 		connections:    make(chan client),
@@ -57,7 +53,7 @@ func NewManager(logModule string, lvc bool) *manager {
 		maxTimeout:     120,
 	}
 
-	logger.Notice("Starting HTTP longpoll publisher")
+	log.Println("Starting HTTP longpoll publisher")
 
 	go m.run()
 	return m
@@ -146,7 +142,7 @@ func (this *manager) Publish(data interface{}) error {
 		timestamp: this.nowToMillisecondEpoch(),
 	}
 
-	logger.Debugf("Publishing event %#v\n", e)
+	log.Printf("Publishing event %#v\n", e)
 
 	this.events <- e
 	return nil
@@ -161,7 +157,7 @@ Status Codes Returned:
 */
 
 func (this *manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	logger.Debugf("Handling HTTP request at %s\n", r.URL)
+	log.Printf("Handling HTTP request at %s\n", r.URL)
 
 	// We'll return JSON no matter what
 	w.Header().Set("Content-Type", "application/json")
@@ -173,7 +169,7 @@ func (this *manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	t, err := strconv.Atoi(r.URL.Query().Get("timeout"))
 	if err != nil || t > this.maxTimeout || t < 1 {
-		logger.Errorf("Invalid timeout parameter for request %s\n", r.URL)
+		log.Printf("Invalid timeout parameter for request %s\n", r.URL)
 
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(`{"error": "invalid timeout parameter"}`))
@@ -181,7 +177,7 @@ func (this *manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Debugf("Timeout is set to %d seconds for request %s\n", t, r.URL)
+	log.Printf("Timeout is set to %d seconds for request %s\n", t, r.URL)
 
 	// Default to looking for all events (ie. `last` defaults to 0)
 	var last int64
@@ -194,7 +190,7 @@ func (this *manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		last, err = strconv.ParseInt(s, 10, 64)
 		if err != nil {
-			logger.Errorf("Error parsing since parameter %s for request %s\n", s, r.URL)
+			log.Printf("Error parsing since parameter %s for request %s\n", s, r.URL)
 
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(`{"error": "invalid since parameter"}`))
@@ -203,7 +199,7 @@ func (this *manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	logger.Debugf("The `since` epoch timestamp is set to %d for request %s\n", last, r.URL)
+	log.Printf("The `since` epoch timestamp is set to %d for request %s\n", last, r.URL)
 
 	cli := client{id: uuid.NewV4(), since: last, messages: make(chan message, 1)}
 	this.connections <- cli
@@ -212,11 +208,11 @@ func (this *manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case msg := <-cli.messages:
-		logger.Debugf("Writing %#v for request %s\n", msg, r.URL)
+		log.Printf("Writing %#v for request %s\n", msg, r.URL)
 
 		m, err := json.Marshal(msg)
 		if err != nil {
-			logger.Error("Error marshaling JSON: %s\n", err.Error())
+			log.Println("Error marshaling JSON: %s\n", err.Error())
 
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(`{"error": "JSON marshal failure"}`))
@@ -224,14 +220,14 @@ func (this *manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Write(m)
 		}
 	case <-time.After(time.Duration(t) * time.Second):
-		logger.Debugf("Timeout reached for request %s\n", r.URL)
+		log.Printf("Timeout reached for request %s\n", r.URL)
 
 		msg := fmt.Sprintf(`{"timestamp": %d}`, this.nowToMillisecondEpoch())
 
 		w.WriteHeader(http.StatusGatewayTimeout)
 		w.Write([]byte(msg))
 	case <-closed:
-		logger.Debugf("Client closed connection for request %s\n", r.URL)
+		log.Printf("Client closed connection for request %s\n", r.URL)
 	}
 
 	this.disconnections <- cli
