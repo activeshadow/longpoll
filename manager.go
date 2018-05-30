@@ -133,7 +133,7 @@ func (this *Manager) nowToMillisecondEpoch() int64 {
 	this.Lock()
 	defer this.Unlock()
 
-	return time.Now().UnixNano() / int64(time.Millisecond)
+	return MillisecondEpoch(time.Now())
 }
 
 func (this *Manager) Publish(data interface{}) error {

@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -29,8 +30,8 @@ type Watcher struct {
 	since     int64
 }
 
-func NewWatcher(s string, t *http.Transport, w int64) *Watcher {
-	return &Watcher{server: s, transport: t, since: w}
+func NewWatcher(s string, t *http.Transport, w time.Time) *Watcher {
+	return &Watcher{server: s, transport: t, since: MillisecondEpoch(w)}
 }
 
 func (this *Watcher) get(ctx context.Context, path string) (int, []byte, error) {

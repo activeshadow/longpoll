@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestLongpoll(t *testing.T) {
@@ -49,7 +50,7 @@ func TestWatcher(t *testing.T) {
 
 	pub := httptest.NewServer(mux)
 
-	watcher := NewWatcher(pub.URL, http.DefaultTransport.(*http.Transport), 0)
+	watcher := NewWatcher(pub.URL, http.DefaultTransport.(*http.Transport), time.Time{})
 	events := make(chan Event)
 	done := make(chan struct{})
 
