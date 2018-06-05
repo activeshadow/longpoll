@@ -2,6 +2,7 @@ package longpoll
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/satori/go.uuid"
 )
+
+var NoSubscribersError = errors.New("no subscribers")
 
 type event struct {
 	Data      interface{} `json:"data"`
@@ -145,6 +148,11 @@ func (this *Manager) Publish(data interface{}) error {
 	log.Printf("Publishing event %#v\n", e)
 
 	this.events <- e
+
+	if len(this.clients) == 0 {
+		return NoSubscribersError
+	}
+
 	return nil
 }
 
