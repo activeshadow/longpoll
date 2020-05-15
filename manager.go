@@ -27,6 +27,7 @@ type message struct {
 
 type client struct {
 	id       uuid.UUID
+	ctx      context.Context
 	since    int64
 	messages chan message
 }
@@ -79,6 +80,10 @@ func (this *Manager) Start(ctx context.Context) error {
 					continue
 				}
 
+				if e.Data = this.options.callback(c.ctx, e.Data); e.Data == nil {
+					continue
+				}
+
 				msg := message{Timestamp: e.timestamp, Events: []event{e}}
 				c.messages <- msg
 			}
@@ -111,7 +116,17 @@ func (this *Manager) add(cli client) {
 	if events == nil {
 		this.clients = append(this.clients, cli)
 	} else {
-		cli.messages <- message{Timestamp: tstamp, Events: events}
+		var toBeSent []event
+
+		for _, e := range events {
+			if e.Data = this.options.callback(cli.ctx, e.Data); e.Data != nil {
+				toBeSent = append(toBeSent, e)
+			}
+		}
+
+		if toBeSent != nil {
+			cli.messages <- message{Timestamp: tstamp, Events: toBeSent}
+		}
 	}
 }
 
@@ -207,7 +222,7 @@ func (this *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	logger.V(9).Info("request parameters", "timeout", t, "since", last)
 
-	cli := client{id: uuid.Must(uuid.NewV4()), since: last, messages: make(chan message, 1)}
+	cli := client{id: uuid.Must(uuid.NewV4()), ctx: r.Context(), since: last, messages: make(chan message, 1)}
 	this.connections <- cli
 
 	closed := w.(http.CloseNotifier).CloseNotify()

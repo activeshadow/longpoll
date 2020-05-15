@@ -1,19 +1,26 @@
 package longpoll
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
+
+type eventCallback func(context.Context, interface{}) interface{}
 
 type ManagerOption func(*managerOptions)
 
 type managerOptions struct {
 	lvc        bool
 	maxTimeout int
+	callback   eventCallback
 }
 
 func newManagerOptions(opts ...ManagerOption) managerOptions {
-	o := managerOptions{maxTimeout: 120}
+	o := managerOptions{
+		maxTimeout: 120,
+		callback:   func(_ context.Context, e interface{}) interface{} { return e },
+	}
 
 	for _, opt := range opts {
 		opt(&o)
@@ -31,6 +38,12 @@ func LVC(l bool) ManagerOption {
 func MaxTimeout(m int) ManagerOption {
 	return func(o *managerOptions) {
 		o.maxTimeout = m
+	}
+}
+
+func EventCallback(c eventCallback) ManagerOption {
+	return func(o *managerOptions) {
+		o.callback = c
 	}
 }
 
