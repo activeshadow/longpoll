@@ -1,19 +1,19 @@
 package longpoll
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/satori/go.uuid"
+	"github.com/gofrs/uuid"
 )
 
-var NoSubscribersError = errors.New("no subscribers")
+var ErrNoSubscribers = errors.New("no subscribers")
 
 type event struct {
 	Data      interface{} `json:"data"`
@@ -34,6 +34,8 @@ type client struct {
 type Manager struct {
 	sync.Mutex
 
+	options managerOptions
+
 	clients []client
 
 	connections    chan client
@@ -45,32 +47,28 @@ type Manager struct {
 	maxTimeout int
 }
 
-func NewManager(lvc bool) *Manager {
-	m := &Manager{
-		clients:        make([]client, 0),
+func NewManager(opts ...ManagerOption) *Manager {
+	return &Manager{
+		options:        newManagerOptions(opts...),
 		connections:    make(chan client),
 		disconnections: make(chan client),
 		events:         make(chan event),
-		history:        make([]event, 0),
-		lvc:            lvc,
-		maxTimeout:     120,
 	}
-
-	log.Println("Starting HTTP longpoll publisher")
-
-	go m.run()
-	return m
 }
 
-func (this *Manager) run() {
+func (this *Manager) Start(ctx context.Context) error {
+	logger.Info("starting HTTP longpoll manager")
+
 	for {
 		select {
+		case <-ctx.Done():
+			return nil
 		case cli := <-this.connections:
 			this.add(cli)
 		case cli := <-this.disconnections:
 			this.remove(cli)
 		case e := <-this.events:
-			if this.lvc {
+			if this.options.lvc {
 				this.history = []event{e}
 			} else {
 				this.history = append(this.history, e)
@@ -145,12 +143,12 @@ func (this *Manager) Publish(data interface{}) error {
 		timestamp: this.nowToMillisecondEpoch(),
 	}
 
-	log.Printf("Publishing event %#v\n", e)
+	logger.V(9).Info("publishing event", "event", e)
 
 	this.events <- e
 
 	if len(this.clients) == 0 {
-		return NoSubscribersError
+		return ErrNoSubscribers
 	}
 
 	return nil
@@ -165,7 +163,9 @@ Status Codes Returned:
 */
 
 func (this *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Handling HTTP request at %s\n", r.URL)
+	logger := logger.WithValues("url", r.URL)
+
+	logger.V(5).Info("handling HTTP request")
 
 	// We'll return JSON no matter what
 	w.Header().Set("Content-Type", "application/json")
@@ -176,16 +176,14 @@ func (this *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Expires", "0")                                         // Proxies
 
 	t, err := strconv.Atoi(r.URL.Query().Get("timeout"))
-	if err != nil || t > this.maxTimeout || t < 1 {
-		log.Printf("Invalid timeout parameter for request %s\n", r.URL)
+	if err != nil || t > this.options.maxTimeout || t < 1 {
+		logger.Error(nil, "invalid timeout request")
 
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(`{"error": "invalid timeout parameter"}`))
 
 		return
 	}
-
-	log.Printf("Timeout is set to %d seconds for request %s\n", t, r.URL)
 
 	// Default to looking for all events (ie. `last` defaults to 0)
 	var last int64
@@ -198,7 +196,7 @@ func (this *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		last, err = strconv.ParseInt(s, 10, 64)
 		if err != nil {
-			log.Printf("Error parsing since parameter %s for request %s\n", s, r.URL)
+			logger.Error(err, "parsing since parameter", "since", s)
 
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(`{"error": "invalid since parameter"}`))
@@ -207,20 +205,20 @@ func (this *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	log.Printf("The `since` epoch timestamp is set to %d for request %s\n", last, r.URL)
+	logger.V(9).Info("request parameters", "timeout", t, "since", last)
 
-	cli := client{id: uuid.NewV4(), since: last, messages: make(chan message, 1)}
+	cli := client{id: uuid.Must(uuid.NewV4()), since: last, messages: make(chan message, 1)}
 	this.connections <- cli
 
 	closed := w.(http.CloseNotifier).CloseNotify()
 
 	select {
 	case msg := <-cli.messages:
-		log.Printf("Writing %#v for request %s\n", msg, r.URL)
+		logger.V(7).Info("response for request", "msg", msg)
 
 		m, err := json.Marshal(msg)
 		if err != nil {
-			log.Println("Error marshaling JSON: %s\n", err.Error())
+			logger.Error(err, "marshaling JSON")
 
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(`{"error": "JSON marshal failure"}`))
@@ -228,14 +226,14 @@ func (this *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Write(m)
 		}
 	case <-time.After(time.Duration(t) * time.Second):
-		log.Printf("Timeout reached for request %s\n", r.URL)
+		logger.V(7).Info("timeout reached")
 
 		msg := fmt.Sprintf(`{"timestamp": %d}`, this.nowToMillisecondEpoch())
 
 		w.WriteHeader(http.StatusGatewayTimeout)
 		w.Write([]byte(msg))
 	case <-closed:
-		log.Printf("Client closed connection for request %s\n", r.URL)
+		logger.V(7).Info("client closed connection")
 	}
 
 	this.disconnections <- cli

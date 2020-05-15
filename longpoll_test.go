@@ -10,28 +10,36 @@ import (
 )
 
 func TestLongpoll(t *testing.T) {
-	mux := http.NewServeMux()
-	mgr := NewManager(false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
+	mgr := NewManager(LVC(false))
+	go mgr.Start(ctx)
+
+	mux := http.NewServeMux()
 	mux.Handle("/events/watch", mgr)
 
-	pub := httptest.NewServer(mux)
-	cli := &http.Client{}
-	done := make(chan struct{})
+	var (
+		pub  = httptest.NewServer(mux)
+		cli  = &http.Client{}
+		done = make(chan error)
+	)
 
 	req, _ := http.NewRequest("GET", pub.URL+"/events/watch?timeout=120", nil)
 
 	go func() {
 		resp, err := cli.Do(req)
 		if err != nil {
-			t.FailNow()
+			done <- err
+			return
 		}
 
 		defer resp.Body.Close()
 
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			t.FailNow()
+			done <- err
+			return
 		}
 
 		t.Log(string(body))
@@ -39,27 +47,34 @@ func TestLongpoll(t *testing.T) {
 	}()
 
 	mgr.Publish(map[string]string{"hello": "world!"})
-	<-done
+	err := <-done
+
+	if err != nil {
+		t.Log(err)
+		t.FailNow()
+	}
 }
 
 func TestWatcher(t *testing.T) {
-	mux := http.NewServeMux()
-	mgr := NewManager(false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
+	mgr := NewManager(LVC(false))
+	go mgr.Start(ctx)
+
+	mux := http.NewServeMux()
 	mux.Handle("/events/watch", mgr)
 
-	pub := httptest.NewServer(mux)
-
-	watcher := NewWatcher(pub.URL, http.DefaultTransport.(*http.Transport), time.Time{})
-	events := make(chan Event)
-	done := make(chan struct{})
-
-	ctx, cancel := context.WithCancel(context.Background())
+	var (
+		pub     = httptest.NewServer(mux)
+		events  = make(chan Event)
+		done    = make(chan struct{})
+		watcher = NewWatcher(Endpoint(pub.URL), Transport(http.DefaultTransport.(*http.Transport)), Since(time.Time{}))
+	)
 
 	go func() {
 		event := <-events
 		t.Log(string(event.Data))
-		cancel()
 		close(done)
 	}()
 

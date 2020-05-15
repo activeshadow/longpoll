@@ -1,0 +1,6 @@
+actshad.dev/logr v1.0.0 h1:Ypsbl9lf5HEYK6qpRCxMB1IxBtd2OKPVnR/piTyBhYw=
+actshad.dev/logr v1.0.0/go.mod h1:MEEDNhsDghsnfr9JmKBHtM0rxwzkEOpd8/iYpdgjzUM=
+github.com/go-logr/logr v0.1.0 h1:M1Tv3VzNlEHg6uyACnRdtrploV2P7wZqH8BoQMtz0cg=
+github.com/go-logr/logr v0.1.0/go.mod h1:ixOQHD9gLJUVQQ2ZOR7zLEifBX6tGkNJF4QyIY7sIas=
+github.com/gofrs/uuid v3.3.0+incompatible h1:8K4tyRfvU1CYPgJsveYFQMhpFd/wXNM7iK6rR7UHz84=
+github.com/gofrs/uuid v3.3.0+incompatible/go.mod h1:b2aQJv3Z4Fp6yNu3cdSllBxTCLRxnplIgP/c0N/04lM=

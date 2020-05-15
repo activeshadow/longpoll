@@ -7,9 +7,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"sync"
-	"time"
-
-	"github.com/pkg/errors"
 )
 
 type Event struct {
@@ -25,65 +22,60 @@ type Message struct {
 type Watcher struct {
 	sync.RWMutex
 
-	server    string
-	transport *http.Transport
-	since     int64
+	options watcherOptions
 }
 
-func NewWatcher(s string, t *http.Transport, w time.Time) *Watcher {
-	return &Watcher{server: s, transport: t, since: MillisecondEpoch(w)}
+func NewWatcher(opts ...WatcherOption) *Watcher {
+	return &Watcher{options: newWatcherOptions(opts...)}
 }
 
 func (this *Watcher) get(ctx context.Context, path string) (int, []byte, error) {
-	cli := &http.Client{Transport: this.transport}
-	uri := this.server + path
+	cli := &http.Client{Transport: this.options.transport}
+	uri := this.options.endpoint + path
 
 	for {
 		req, err := http.NewRequest("GET", uri, nil)
 		if err != nil {
-			return 0, []byte{}, errors.Wrap(err, "creating new HTTP request")
+			return 0, []byte{}, fmt.Errorf("creating new HTTP request: %w", err)
 		}
 
 		resp, err := cli.Do(req.WithContext(ctx))
 		if err != nil {
 			if ctx.Err() != nil {
-				return 0, []byte{}, errors.Wrap(ctx.Err(), "context activity during HTTP request")
+				return 0, []byte{}, fmt.Errorf("context activity during HTTP request: %w", ctx.Err())
 			}
 
-			return 0, []byte{}, errors.Wrap(err, "making HTTP request")
+			return 0, []byte{}, fmt.Errorf("making HTTP request: %w", err)
 		}
 
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			return resp.StatusCode, []byte{}, errors.Wrap(err, "reading HTTP response body")
+			return resp.StatusCode, []byte{}, fmt.Errorf("reading HTTP response body: %w", err)
 		}
 
 		resp.Body.Close()
 		return resp.StatusCode, body, nil
 	}
-
-	// should never get here
-	return 0, []byte{}, errors.New("unable to make GET request")
 }
 
 func (this *Watcher) Watch(ctx context.Context, path string, events chan Event) error {
 	for {
-		path := fmt.Sprintf("%s?timeout=%d&since=%d", path, 120, this.since)
+		path := fmt.Sprintf("%s?timeout=%d&since=%d", path, 120, this.options.since)
 		code, body, err := this.get(ctx, path)
 		if err != nil {
-			return errors.Wrap(err, "get call -- watch function")
+			return fmt.Errorf("get call -- watch function: %w", err)
 		}
 
 		var r = Message{}
 		err = json.Unmarshal(body, &r)
 		if err != nil {
-			return errors.Wrap(err, "unmarshaling longpoll publish data")
+			return fmt.Errorf("unmarshaling longpoll publish data: %w", err)
 		}
 
 		switch code {
 		case http.StatusOK:
 			this.Lock()
-			this.since = r.Timestamp
+			this.options.since = r.Timestamp
 			this.Unlock()
 
 			for _, e := range r.Events {
@@ -91,15 +83,12 @@ func (this *Watcher) Watch(ctx context.Context, path string, events chan Event) 
 			}
 		case http.StatusGatewayTimeout:
 			this.Lock()
-			this.since = r.Timestamp
+			this.options.since = r.Timestamp
 			this.Unlock()
 		case http.StatusBadRequest, http.StatusInternalServerError:
-			return errors.Wrap(errors.New(r.Error), "from longpoll server")
+			return fmt.Errorf("from longpoll server: %s", r.Error)
 		default:
 			return fmt.Errorf("unknown response status code %d", code)
 		}
 	}
-
-	// should never get here
-	return errors.New("unable to watch for longpoll events")
 }
