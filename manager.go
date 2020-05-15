@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"strconv"
 	"sync"
@@ -222,7 +223,18 @@ func (this *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	logger.V(9).Info("request parameters", "timeout", t, "since", last)
 
-	cli := client{id: uuid.Must(uuid.NewV4()), ctx: r.Context(), since: last, messages: make(chan message, 1)}
+	var (
+		id  = uuid.Must(uuid.NewV4())
+		ctx = context.WithValue(r.Context(), "id", id)
+	)
+
+	if r.Method == http.MethodPost {
+		if body, err := ioutil.ReadAll(r.Body); err == nil {
+			ctx = context.WithValue(ctx, "body", body)
+		}
+	}
+
+	cli := client{id: id, ctx: ctx, since: last, messages: make(chan message, 1)}
 	this.connections <- cli
 
 	closed := w.(http.CloseNotifier).CloseNotify()
